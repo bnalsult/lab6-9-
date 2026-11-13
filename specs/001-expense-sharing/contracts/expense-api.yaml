@@ -1,0 +1,388 @@
+openapi: 3.0.3
+info:
+  title: SplitSmart Expense API
+  version: 1.0.0
+servers:
+  - url: /api
+paths:
+  /auth/register:
+    post:
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterUserRequest'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /groups:
+    post:
+      summary: Create a new group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGroupRequest'
+      responses:
+        '201':
+          description: Group created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+
+  /groups/{groupId}/expenses:
+    get:
+      summary: List group expenses
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      responses:
+        '200':
+          description: List of expenses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Expense'
+    post:
+      summary: Create a new expense
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExpenseRequest'
+      responses:
+        '201':
+          description: Expense submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Expense'
+
+  /expenses/{expenseId}/approve:
+    post:
+      summary: Approve or reject an expense
+      parameters:
+        - $ref: '#/components/parameters/ExpenseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+      responses:
+        '200':
+          description: Expense decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRecord'
+
+  /payments:
+    post:
+      summary: Record a payment settlement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
+      responses:
+        '201':
+          description: Payment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRecord'
+
+  /reports/summary:
+    get:
+      summary: Generate a user or group report
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: groupId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: fromDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: toDate
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Report summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportSummary'
+
+components:
+  parameters:
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ExpenseId:
+      name: expenseId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    RegisterUserRequest:
+      type: object
+      required: [email, password, firstName, lastName]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        firstName:
+          type: string
+        lastName:
+          type: string
+
+    AuthResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      required: [id, email, firstName, lastName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+
+    CreateGroupRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+
+    Group:
+      type: object
+      required: [id, name, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateExpenseRequest:
+      type: object
+      required: [amount, expenseDate, description, splitMethod, participantIds]
+      properties:
+        amount:
+          type: number
+          format: double
+        expenseDate:
+          type: string
+          format: date
+        description:
+          type: string
+        splitMethod:
+          type: string
+          enum: [equal, percentage]
+        percentageValues:
+          type: array
+          items:
+            type: number
+        participantIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        receiptUrl:
+          type: string
+          nullable: true
+
+    Expense:
+      type: object
+      required: [id, groupId, amount, expenseDate, description, splitMethod, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        groupId:
+          type: string
+          format: uuid
+        createdByUserId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: double
+        expenseDate:
+          type: string
+          format: date
+        description:
+          type: string
+        splitMethod:
+          type: string
+          enum: [equal, percentage]
+        status:
+          type: string
+          enum: [draft, submitted, approved, rejected, archived]
+        receiptUrl:
+          type: string
+          nullable: true
+
+    ApprovalRequest:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected]
+        notes:
+          type: string
+
+    ApprovalRecord:
+      type: object
+      required: [id, expenseId, approverUserId, decision, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        expenseId:
+          type: string
+          format: uuid
+        approverUserId:
+          type: string
+          format: uuid
+        decision:
+          type: string
+          enum: [approved, rejected]
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    CreatePaymentRequest:
+      type: object
+      required: [groupId, payerUserId, receiverUserId, amount, paymentDate]
+      properties:
+        groupId:
+          type: string
+          format: uuid
+        payerUserId:
+          type: string
+          format: uuid
+        receiverUserId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: double
+        paymentDate:
+          type: string
+          format: date
+        notes:
+          type: string
+
+    PaymentRecord:
+      type: object
+      required: [id, groupId, payerUserId, receiverUserId, amount, paymentDate]
+      properties:
+        id:
+          type: string
+          format: uuid
+        groupId:
+          type: string
+          format: uuid
+        payerUserId:
+          type: string
+          format: uuid
+        receiverUserId:
+          type: string
+          format: uuid
+        amount:
+          type: number
+          format: double
+        paymentDate:
+          type: string
+          format: date
+
+    ReportSummary:
+      type: object
+      required: [groupId, currency, totals]
+      properties:
+        groupId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        totals:
+          type: object
+          properties:
+            totalExpenses:
+              type: number
+            totalPayments:
+              type: number
+            netBalances:
+              type: array
+              items:
+                type: object
+                properties:
+                  userId:
+                    type: string
+                    format: uuid
+                  amount:
+                    type: number
