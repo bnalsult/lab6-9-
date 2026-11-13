@@ -1,0 +1,123 @@
+@startuml SplitSmartExpenseActivity
+title SplitSmart — Expense Submission and Approval
+start
+partition "Web / Mobile / Swing client" {
+  :Collect expense details;
+  :Send POST /api/v1/groups/{groupId}/expenses;
+}
+partition "API and application" {
+  :Authenticate actor;
+  if (Authenticated?) then (no)
+    :Return 401;
+    stop
+  endif
+  :Authorize group membership and participant scope;
+  if (Authorized?) then (no)
+    :Return 403 or scoped 404;
+    stop
+  endif
+  :Validate amount, date, description, participants;
+  if (Inputs valid?) then (no)
+    :Return validation error;
+    stop
+  endif
+  :Select equal or percentage SplitStrategy;
+  :Calculate exact shares using Money rounding rules;
+  if (Shares valid and total matches?) then (no)
+    :Reject invalid split;
+    stop
+  endif
+  :Persist Expense as SUBMITTED;
+  :Persist notification intent in outbox;
+  note right
+    No ledger event or balance change
+    occurs during submission.
+  end note
+  :Return submitted expense;
+}
+partition "Web / Mobile / Swing client" {
+  :Render pending expense;
+}
+partition "Designated approver" {
+  :Review expense;
+  if (Approve?) then (yes)
+    :Send approval decision;
+  else (no)
+    :Send rejection decision and notes;
+  endif
+}
+partition "API and application" {
+  :Authenticate and authorize designated approver;
+  if (Approver valid and not creator?) then (no)
+    :Return forbidden error;
+    stop
+  endif
+  :Begin database transaction;
+  if (Expense is SUBMITTED and decision not already recorded?) then (no)
+    :Rollback and return conflict/stale-state error;
+    stop
+  endif
+  if (Decision is approve?) then (yes)
+    :Transition Expense to APPROVED;
+    :Append ApprovalRecord;
+    :Append unique ExpenseApproved LedgerEvent;
+    :Update or invalidate rebuildable balance projection;
+    :Append notification outbox intent;
+  else (reject)
+    :Transition Expense to REJECTED;
+    :Append ApprovalRecord with notes;
+    :Append notification outbox intent;
+    note right
+      Rejected expenses have no
+      ledger event or balance effect.
+    end note
+  endif
+  :Commit transaction;
+}
+partition "Outbox worker" {
+  :Deliver in-app / push notification asynchronously;
+  if (Delivery succeeds?) then (yes)
+    :Mark delivery complete;
+  else (no)
+    :Record attempt and retry later;
+  endif
+}
+stop
+@enduml
+
+@startuml SplitSmartPaymentActivity
+title SplitSmart — Payment, Balance, and Report Query
+start
+partition "Web / Mobile / Swing client" {
+  :Submit payment or request balances/report;
+}
+partition "API and application" {
+  :Authenticate actor and authorize group scope;
+  if (Authorized?) then (no)
+    :Return access error;
+    stop
+  endif
+  if (Request is payment?) then (yes)
+    :Validate payer, receiver, positive amount,
+    group membership, and settlement policy;
+    if (Payment valid?) then (no)
+      :Return validation/conflict error;
+      stop
+    endif
+    :Begin transaction;
+    :Append immutable Payment and PaymentRecorded event;
+    :Append unique LedgerEvent and outbox intent;
+    :Update or invalidate rebuildable balance projection;
+    :Commit transaction;
+  else (query)
+    :Apply group and date filters from authorized scope;
+    :Read source records and/or rebuildable projections;
+    :Build balances or report DTO;
+  endif
+  :Return API response;
+}
+partition "Web / Mobile / Swing client" {
+  :Render payment confirmation, balances, or report;
+}
+stop
+@enduml

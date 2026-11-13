@@ -3,11 +3,14 @@ info:
   title: SplitSmart Expense API
   version: 1.0.0
 servers:
-  - url: /api
+  - url: /api/v1
+security:
+  - BearerAuth: []
 paths:
   /auth/register:
     post:
       summary: Register a new user
+      security: []
       requestBody:
         required: true
         content:
@@ -144,6 +147,11 @@ paths:
                 $ref: '#/components/schemas/ReportSummary'
 
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   parameters:
     GroupId:
       name: groupId
@@ -201,6 +209,7 @@ components:
 
     CreateGroupRequest:
       type: object
+      description: The creator becomes group owner and initial designated approver.
       required: [name]
       properties:
         name:
@@ -222,14 +231,23 @@ components:
         createdAt:
           type: string
           format: date-time
+        designatedApproverUserId:
+          type: string
+          format: uuid
 
     CreateExpenseRequest:
       type: object
-      required: [amount, expenseDate, description, splitMethod, participantIds]
+      required: [amount, currency, payerUserId, expenseDate, description, splitMethod, participantIds]
       properties:
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        payerUserId:
+          type: string
+          format: uuid
         amount:
-          type: number
-          format: double
+          type: string
         expenseDate:
           type: string
           format: date
@@ -240,20 +258,23 @@ components:
           enum: [equal, percentage]
         percentageValues:
           type: array
+          description: Percentages correspond by index to participantIds and must total exactly 100.
           items:
             type: number
+            minimum: 0
+            maximum: 100
         participantIds:
           type: array
           items:
             type: string
             format: uuid
-        receiptUrl:
+        receiptId:
           type: string
           nullable: true
 
     Expense:
       type: object
-      required: [id, groupId, amount, expenseDate, description, splitMethod, status]
+      required: [id, groupId, payerUserId, amount, currency, expenseDate, description, splitMethod, status]
       properties:
         id:
           type: string
@@ -264,9 +285,15 @@ components:
         createdByUserId:
           type: string
           format: uuid
+        payerUserId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
         amount:
-          type: number
-          format: double
+          type: string
         expenseDate:
           type: string
           format: date
@@ -278,12 +305,13 @@ components:
         status:
           type: string
           enum: [draft, submitted, approved, rejected, archived]
-        receiptUrl:
+        receiptId:
           type: string
           nullable: true
 
     ApprovalRequest:
       type: object
+      description: The authenticated designated approver decides; the creator cannot approve their own expense.
       required: [decision]
       properties:
         decision:
@@ -317,7 +345,7 @@ components:
 
     CreatePaymentRequest:
       type: object
-      required: [groupId, payerUserId, receiverUserId, amount, paymentDate]
+      required: [groupId, payerUserId, receiverUserId, amount, currency, paymentDate]
       properties:
         groupId:
           type: string
@@ -329,8 +357,11 @@ components:
           type: string
           format: uuid
         amount:
-          type: number
-          format: double
+          type: string
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
         paymentDate:
           type: string
           format: date
@@ -339,7 +370,7 @@ components:
 
     PaymentRecord:
       type: object
-      required: [id, groupId, payerUserId, receiverUserId, amount, paymentDate]
+      required: [id, groupId, payerUserId, receiverUserId, amount, currency, paymentDate]
       properties:
         id:
           type: string
@@ -354,8 +385,11 @@ components:
           type: string
           format: uuid
         amount:
-          type: number
-          format: double
+          type: string
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
         paymentDate:
           type: string
           format: date

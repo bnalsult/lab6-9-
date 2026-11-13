@@ -1,0 +1,139 @@
+@startuml SplitSmartClassDiagram
+title SplitSmart — Hybrid Java Architecture and Core Domain
+hide empty members
+skinparam packageStyle rectangle
+skinparam linetype ortho
+
+package "Clients (independent API consumers)" {
+  package "Web" as WebClient {
+    class WebUI <<presentation>>
+  }
+  package "Android / iOS" as MobileClient {
+    class MobileUI <<presentation>>
+  }
+  package "Java Swing" as DesktopClient {
+    class SwingView <<presentation>>
+    class ExpensePresenter <<presentation>>
+    class SplitSmartApiClient <<transport>>
+    SwingView --> ExpensePresenter
+    ExpensePresenter --> SplitSmartApiClient
+  }
+}
+
+package "Backend — Java modular monolith" {
+  package "Web/API adapter" {
+    class RestController <<adapter>>
+    class ApiRequestDTO <<DTO>>
+    class ApiResponseDTO <<DTO>>
+    RestController --> ApiRequestDTO
+    RestController --> ApiResponseDTO
+  }
+  package "Application" {
+    interface SubmitExpense <<in port>>
+    interface ApproveExpense <<in port>>
+    interface RecordPayment <<in port>>
+    interface GetBalances <<in port>>
+    interface GenerateReport <<in port>>
+    interface ExpenseRepository <<out port>>
+    interface GroupRepository <<out port>>
+    interface LedgerRepository <<out port>>
+    interface NotificationOutbox <<out port>>
+    class CurrentActor
+    class GroupAccessPolicy
+    class ExpenseApprovalPolicy
+    class SubmitExpenseService <<use case>>
+    class ApproveExpenseService <<use case>>
+    class RecordPaymentService <<use case>>
+    class BalanceQueryService <<query>>
+    class ReportQueryService <<query>>
+    SubmitExpenseService ..|> SubmitExpense
+    ApproveExpenseService ..|> ApproveExpense
+    RecordPaymentService ..|> RecordPayment
+    BalanceQueryService ..|> GetBalances
+    ReportQueryService ..|> GenerateReport
+    SubmitExpenseService --> ExpenseRepository
+    SubmitExpenseService --> GroupAccessPolicy
+    SubmitExpenseService --> NotificationOutbox
+    ApproveExpenseService --> ExpenseRepository
+    ApproveExpenseService --> ExpenseApprovalPolicy
+    ApproveExpenseService --> LedgerRepository
+    ApproveExpenseService --> NotificationOutbox
+    RecordPaymentService --> LedgerRepository
+    RecordPaymentService --> GroupAccessPolicy
+    BalanceQueryService --> LedgerRepository
+  }
+  package "Domain (framework-free)" {
+    class UserAccount <<aggregate root>>
+    class ExpenseGroup <<aggregate root>>
+    class GroupMembership
+    class Expense <<aggregate root>> {
+      +submit()
+      +approve(approverId)
+      +reject(approverId, notes)
+    }
+    class ExpenseParticipant
+    class ApprovalRecord <<immutable>>
+    class Money <<value object>>
+    interface SplitStrategy
+    class EqualSplitStrategy
+    class PercentageSplitStrategy
+    enum ExpenseStatus {
+      DRAFT
+      SUBMITTED
+      APPROVED
+      REJECTED
+    }
+    class Payment <<immutable event>>
+    class LedgerEvent <<immutable>>
+    class BalanceProjection <<rebuildable read model>>
+    class DomainEvent
+    class ExpenseApproved
+    class PaymentRecorded
+    ExpenseGroup "1" o-- "1..*" GroupMembership
+    UserAccount "1" -- "0..*" GroupMembership
+    Expense "1" *-- "1..*" ExpenseParticipant
+    Expense "1" *-- "0..1" ApprovalRecord
+    Expense --> ExpenseStatus
+    ExpenseParticipant --> Money
+    Expense --> SplitStrategy
+    SplitStrategy <|.. EqualSplitStrategy
+    SplitStrategy <|.. PercentageSplitStrategy
+    Expense --> ExpenseApproved
+    Payment --> PaymentRecorded
+    ExpenseApproved ..> LedgerEvent : source for posting
+    PaymentRecorded ..> LedgerEvent : source for posting
+    LedgerEvent ..> BalanceProjection : rebuild/update
+  }
+  package "Outbound adapters" {
+    class PostgresRepositories <<adapter>>
+    class ObjectStorageAdapter <<adapter>>
+    class OutboxDeliveryWorker <<adapter>>
+    class NotificationProviderAdapter <<adapter>>
+    PostgresRepositories ..|> ExpenseRepository
+    PostgresRepositories ..|> GroupRepository
+    PostgresRepositories ..|> LedgerRepository
+    OutboxDeliveryWorker ..|> NotificationOutbox
+    OutboxDeliveryWorker --> NotificationProviderAdapter
+  }
+}
+
+WebUI --> RestController : HTTPS / JSON
+MobileUI --> RestController : HTTPS / JSON
+SplitSmartApiClient --> RestController : HTTPS / JSON
+RestController --> SubmitExpense
+RestController --> ApproveExpense
+RestController --> RecordPayment
+RestController --> GetBalances
+RestController --> GenerateReport
+SubmitExpenseService ..> Expense : invokes domain behavior
+ApproveExpenseService ..> Expense : invokes domain behavior
+RecordPaymentService ..> Payment : creates event
+PostgresRepositories --> Expense
+PostgresRepositories --> LedgerEvent
+
+note bottom of BalanceProjection
+  Never directly edited. Rebuild from approved expense
+  and payment source events. Pending/rejected expenses
+  create no financial posting.
+end note
+@enduml

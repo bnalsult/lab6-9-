@@ -1,69 +1,44 @@
-# Research: SplitSmart Expense Sharing
+# Research and Architecture Decisions: SplitSmart
 
-## Research Questions
+## Consolidated decision
 
-### 1) Which architecture best matches the product and the constitutional constraints?
+Adopt the **Hybrid Java architecture** detailed in `architecture-decision.md`. The backend is a Java 21 modular monolith exposing a shared, versioned REST API. Browser, Android/iOS, and Java Swing clients use that API. PostgreSQL is the transactional source of truth; receipt binaries use private object storage. The backend owns authorization, expense approval, split calculations, ledger events, payments, balances, reports, and notification intent.
 
-Decision: Use a shared backend API with separate web and mobile clients, backed by PostgreSQL and object storage for receipts.
+This consolidates the original Spec Kit product architecture (shared backend API plus distinct browser/mobile clients) with the alternative Java architecture (inward dependencies, domain-focused modules, and Ports and Adapters). It replaces the prior .NET/React technology selection; it does not change the product’s group expense scope or single-approver v1 rule.
 
-Rationale:
-- The spec requires secure account isolation, role-based group membership, approval gates, and balance reconciliation.
-- Centralizing the business logic in one API prevents drift between web and mobile experiences.
-- PostgreSQL provides reliable transactional integrity and reporting queries for balances and payment histories.
-- Receipt images are large and less likely to belong in the primary relational schema; object storage keeps the system efficient and scalable.
+## Decisions and rationale
 
-Alternatives considered:
-- Single monolithic app with direct DB access in the UI: rejected because it weakens security boundaries and makes cross-platform consistency harder to enforce.
-- Serverless functions only: rejected because the domain logic and approval workflow are too stateful and audit-sensitive for a fragmented architecture.
+### Backend shape and client topology
 
-### 2) What approval model should be implemented in v1?
+Use a modular monolith so approval, audit recording, ledger posting, and notification intent can share a clear transactional boundary. A microservice split is not justified by the current small-to-medium group scope. Establish modules and dependency rules now; extract services only if operational evidence later warrants it.
 
-Decision: Use a single designated approver per group, with a review decision captured in immutable records.
+The REST API is the only client-facing business boundary. Web, mobile, and Swing clients may provide local input feedback, but they do not connect to PostgreSQL/object storage or make authoritative financial decisions. This preserves consistent behavior across platforms.
 
-Rationale:
-- The clarified requirement explicitly chooses a single approver model.
-- This is simpler to govern, easier to test, and consistent with the constitutional requirement for auditability.
+### Domain and persistence model
 
-Alternatives considered:
-- Multi-level approval: rejected because it adds complexity and delay beyond the v1 requirement.
-- No approval gate: rejected because it violates the finance integrity principle and introduces disputes.
+Balances are derived from approved expenses and payment events. Source financial records and approval decisions are append-only; a materialized balance view is allowed only as a rebuildable projection. Expense approval, approval audit record, ledger source event, and outbox intent commit atomically. Idempotency and a unique source-event reference prevent duplicate postings.
 
-### 3) How should the system calculate and reconcile balances?
+### Expense approval
 
-Decision: Treat balances as derived values from approved expenses, payment records, and user participation, not as directly editable ledger fields.
+Use one designated approver per group in v1. A submitter cannot approve their own expense. Pending and rejected expenses have no ledger effect; rejection retains its actor, decision, timestamp, and notes.
 
-Rationale:
-- Balance changes are a consequence of validated events and should be reproducible from underlying data.
-- This preserves transparency and prevents hidden or manual edits that would break auditing.
+### Splits and money
 
-Alternatives considered:
-- Direct user-editable balance fields: rejected because they violate the constitution and make settlement history untrustworthy.
-- Recalculation only at report time: rejected because it would delay user-visible updates and complicate payment reconciliation.
+Support equal and percentage splits. Use decimal money with an explicit currency and rounding rule. Equal split remainder assignment is deterministic; percentage splits must total exactly 100% at the defined precision; participant shares must total the expense amount.
 
-### 4) What notification strategy should be used?
+### Receipts and notifications
 
-Decision: Use in-app feeds plus push notifications for relevant group activity, emitted from backend event handlers.
+Store receipt binaries in private S3-compatible object storage and metadata in PostgreSQL. Expose scoped, short-lived access rather than general storage credentials. Persist notification intent in a transactional outbox and deliver asynchronously with retries; delivery failure does not undo a committed financial operation.
 
-Rationale:
-- The requirement requires notification when new expenses or updates occur in a group.
-- Event-driven notifications keep group members informed without making the client poll aggressively.
+## Alternatives considered
 
-Alternatives considered:
-- Email-only delivery: rejected because it is not immediate enough and does not match the mobile-first workflow.
-- Client-side polling only: rejected because it is less efficient and less reliable for timely updates.
+- **Original .NET/React baseline:** sound shared-API and multi-client topology, but conflicts with the selected Java/Swing direction and has less explicit domain-level Java structure. Its product requirements and client separation are retained; its stack is superseded.
+- **Java architecture without Swing:** provides good Java backend boundaries and web/mobile API clients, but does not define the requested desktop client. Swing is added as another API client.
+- **Direct database access from desktop/mobile clients:** rejected because it bypasses authorization and makes client behavior authoritative.
+- **Microservices:** rejected for v1 because they complicate atomic approval/ledger operations without a demonstrated independent-scaling need.
+- **Editable balance fields:** rejected because they break auditability and reconciliation.
+- **Multi-level or absent approval:** rejected; clarified product decision is a single approver.
 
-### 5) How should receipt images be handled?
+## Open product/operational decisions
 
-Decision: Store receipt files in object storage and record metadata in the expense record.
-
-Rationale:
-- Receipt uploads are large and may involve binary data.
-- Keeping them out of the core transactional database helps maintain performance and simplifies retention rules.
-
-Alternatives considered:
-- Store images directly in the database: rejected because it increases database load and complicates backup/retention.
-- Ignore receipts: rejected because the requirements explicitly call for optional receipt images.
-
-## Final Architecture Decision
-
-SplitSmart will be implemented as a secure backend service with a Postgres-owned truth model, a React-based web client, and a React Native mobile client. Financial flows will be validated by approval rules before they affect balances, and all reporting will be generated from the same underlying ledger and payment records.
+Before implementation, specify policies where the requirements leave choices open: group member removal and historical access, overpayment/partial settlement behavior, approver timeout/reassignment, receipt retention and size/type limits, supported currency and rounding precision, identity provider, notification channel priorities, and report export formats. These do not change the architecture decision.

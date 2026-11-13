@@ -37,6 +37,7 @@ Fields:
 - name: string
 - description: optional string
 - createdByUserId: UUID
+- designatedApproverUserId: UUID
 - createdAt: datetime
 - updatedAt: datetime
 - status: active | archived
@@ -49,6 +50,7 @@ Relationships:
 Validation rules:
 - name must not be empty
 - at least one member is required for an active group
+- designated approver must be an active group member
 
 ### GroupMembership
 
@@ -83,7 +85,7 @@ Fields:
 - expenseDate: date
 - description: string
 - splitMethod: equal | percentage
-- receiptUrl: nullable string
+- receiptId: nullable UUID reference to Receipt metadata
 - status: draft | submitted | approved | rejected | archived
 - submittedAt: nullable datetime
 - approvedAt: nullable datetime
@@ -103,7 +105,7 @@ Validation rules:
 - description must not be empty
 - splitMethod must be supported
 - percentage totals must equal 100% when splitMethod is percentage
-- receiptUrl must be present if a file was uploaded
+- receipt metadata reference must exist if a file was uploaded
 
 State transitions:
 - draft -> submitted -> approved or rejected
@@ -151,25 +153,11 @@ Validation rules:
 - approver cannot approve their own expense in a single-approver workflow
 - decision must be recorded before balance updates are applied
 
-### BalanceLedger
+### LedgerEvent and BalanceProjection
 
-Represents the net amount owed between users within a group context.
+LedgerEvent is an immutable source record created only for an approved expense or recorded payment. It identifies the source event, group, affected users, signed amount, currency, and posting time. A unique source-event reference prevents duplicate posting. BalanceProjection is a rebuildable read model of net amounts owed between users within a group; it is never edited as financial source data.
 
-Fields:
-- id: UUID
-- groupId: UUID
-- fromUserId: UUID
-- toUserId: UUID
-- balanceAmount: decimal(18,2)
-- updatedAt: datetime
-
-Relationships:
-- many-to-one with Group
-- many-to-one with UserAccount as debtor and creditor
-
-Validation rules:
-- balanceAmount may be positive or negative depending on direction
-- ledger entries are derived from expense and payment events; no direct manual balance mutations are allowed
+Projection fields (if materialized): groupId, fromUserId, toUserId, balanceAmount, updatedAt. Projection rows are rebuildable and not the authoritative ledger.
 
 ### PaymentRecord
 
@@ -240,6 +228,11 @@ Validation rules:
 
 The system should generate reports and balance summaries from persisted events rather than by storing a secondary mutable copy that can drift from the source records. The key invariant is:
 
-approved expense + payment record + approval record + group membership = current balance state
+approved expense + immutable payment event + approval record + group membership = source for the current balance projection
 
 This preserves auditability and ensures any user-visible balance can be reconstructed from raw financial records.
+
+
+## Consistency with the API and clients
+
+The backend domain model is not serialized directly. Web, mobile, and Swing use API request/response DTOs defined by the OpenAPI contract. ExpenseParticipant share values are computed/validated by the backend. Balance projection values are read-only results; no API operation writes them directly.

@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-12
 
-**Status**: Draft
+**Status**: Architecture consolidated; implementation pending
 
 **Input**: User description: "Customer asked you to develop a software “SplitSmart” for sharing expenses between individuals or groups of people, such as friends, roommates, family members or coworkers. It should come with the following functions/features.
 
@@ -54,16 +54,16 @@ A user signs up for SplitSmart, logs in, and views only the balances and expense
 
 ### User Story 2 - Manage group expenses and split costs fairly (Priority: P1)
 
-A group organizer or member creates an expense for a trip, household, or team activity, selects who participated, and chooses an equal or percentage split. The system calculates each user’s share and updates balances in real time.
+A group organizer or member creates an expense for a trip, household, or team activity, selects who participated, and chooses an equal or percentage split. The system calculates each user’s share and updates balances only after the expense is approved.
 
 **Why this priority**: Shared-expense tracking is the core value of the product; accurate split logic is essential to trust and adoption.
 
-**Independent Test**: A group member can create a shared expense with a date, description, amount, and participants, and the system calculates the correct balances for each user.
+**Independent Test**: A group member can submit a shared expense with a date, description, amount, and participants; after approval, the system calculates the correct balances for each user.
 
 **Acceptance Scenarios**:
 
-1. **Given** a group with three users, **When** one user creates an expense of $150 split equally, **Then** each participant’s balance reflects a $50 share and the payer is credited or debited correctly according to the settlement logic.
-2. **Given** a group with four users and a 50/30/20 expense split, **When** the expense is saved, **Then** each member’s balance is calculated from the specified percentages and totals match the original amount.
+1. **Given** a group with three users, **When** one user submits a $150 expense split equally and the approver approves it, **Then** each participant’s share is $50 and the payer is credited or debited correctly according to the settlement logic.
+2. **Given** a group with three users and a 50/30/20 expense split, **When** the expense is submitted and approved, **Then** each participant’s balance is calculated from the specified percentages and shares total the original amount.
 3. **Given** a user uploads a receipt image with an expense, **When** the expense is created, **Then** the receipt is attached to the expense record and is visible to authorized group members.
 
 ---
@@ -115,16 +115,17 @@ A user records a payment they made to settle a balance, and later reviews custom
 - **FR-002**: The system MUST allow users to create groups and add or remove members as needed for shared activities such as roommates, trips, or events.
 - **FR-003**: The system MUST allow a user to create an expense with an amount, date, description, participant list, split method, and optional receipt image.
 - **FR-004**: The system MUST support at least two expense-splitting methods: equal split and percentage split.
-- **FR-005**: The system MUST calculate each participant’s share based on the selected split method and update balances for all affected users.
+- **FR-005**: The system MUST calculate each participant’s share based on the selected split method and update balances for all affected users only after the designated approver approves the expense.
 - **FR-006**: The system MUST notify group members when a new expense is created or updated in a group they belong to.
 - **FR-007**: The system MUST require a single designated approver to review and approve each expense before it becomes active in the ledger for balance adjustments.
 - **FR-008**: The system MUST retain sufficient metadata for each expense and approval decision to support auditability and dispute resolution.
 - **FR-009**: The system MUST track each user’s outstanding balances with every other participant in a group and keep those balances current as expenses and payments change.
 - **FR-010**: The system MUST allow users to record payments made to settle balances owed and update the remaining balance after payment entry.
 - **FR-011**: The system MUST provide summaries and reports covering expenses, balances, and payments for a user or group over selected date ranges and criteria.
-- **FR-012**: The system MUST provide a primary web experience and a mobile app experience for Android and iOS that supports the core expense, group, notification, and reporting flows.
+- **FR-012**: The system MUST provide a primary web experience and mobile app experiences for Android and iOS that support the core expense, group, notification, and reporting flows through the shared versioned API.
 - **FR-013**: The system MUST prevent unauthorized users from viewing or modifying another user’s private account information or unrelated group balances.
 - **FR-014**: The system MUST reject or flag invalid expense entries such as a malformed date, missing amount, invalid percentage totals, or missing participants.
+- **FR-015**: The system MUST provide a Java Swing desktop client for core account, group, expense, approval, payment, notification, balance, and reporting workflows. The desktop client MUST use the shared versioned API and MUST NOT connect directly to persistence or implement authoritative financial rules.
 
 ### Key Entities
 
@@ -132,7 +133,7 @@ A user records a payment they made to settle a balance, and later reviews custom
 - **Group**: Represents a shared context such as roommates, a trip, or a coworking group, containing members and shared expenses.
 - **Expense**: Represents a recorded cost event with amount, date, description, participants, split method, receipt, and approval status.
 - **Expense Participant**: Represents a user’s involvement in a specific expense and their share of the total cost.
-- **Balance Ledger**: Represents the ongoing record of how much each user owes or is owed by other users within a group or account context.
+- **Ledger Event and Balance Projection**: Immutable financial events record approved expense/payment postings; read-only balance projections summarize amounts owed and can be rebuilt from those events.
 - **Payment Record**: Represents a settlement action that reduces or clears an outstanding balance between users.
 - **Notification**: Represents a message sent to group members when relevant expense or payment activity occurs.
 - **Approval Record**: Represents a review decision for an expense, including approver identity, outcome, and timestamps.
@@ -142,11 +143,12 @@ A user records a payment they made to settle a balance, and later reviews custom
 ### Measurable Outcomes
 
 - **SC-001**: New users can create an account, join a group, and view their expense summary in under 2 minutes during a standard onboarding flow.
-- **SC-002**: Group members can create a shared expense and see the correct balance updates for all affected users within 5 seconds of submitting the expense.
+- **SC-002**: Group members can create a shared expense and see the correct balance updates for all affected users within 5 seconds of approval.
 - **SC-003**: At least 95% of users can complete the primary shared-expense workflow without support intervention during a test session.
 - **SC-004**: Approved expenses and payment records remain consistent across all views, with no unexplained balance mismatch in end-to-end reconciliation checks.
 - **SC-005**: Users can generate custom expense and balance summaries for chosen date ranges and receive reports that match the underlying records for the same period.
-- **SC-006**: The web and mobile experiences support the same core flows for account access, group management, expense entry, notifications, and reporting without blocking critical user tasks.
+- **SC-006**: The web, mobile, and Swing experiences support the same core flows for account access, group management, expense entry, notifications, and reporting without blocking critical user tasks.
+- **SC-007**: The Swing desktop client uses the shared API and supports the same core financial rules and authorization outcomes as the web and mobile clients.
 
 ## Assumptions
 

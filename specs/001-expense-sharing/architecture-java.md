@@ -1,21 +1,21 @@
-﻿# SplitSmart Alternative Architecture Design
+# SplitSmart Hybrid Java Architecture Design
 
-**Status:** Proposed alternative for review  
+**Status:** Accepted; consolidated with the shared-API baseline
 **Date:** 2026-11-12  
 **Scope:** Architecture for the expense-sharing feature in `specs/001-expense-sharing/`  
 **Technology baseline:** Java 21, Maven
 
 ## 1. Purpose
 
-This document proposes an alternative to the current .NET, React, and React Native implementation plan. It retains the requirements and domain rules while using a Java backend organized as a modular monolith, a server-rendered web application, and a shared JSON API for browser and Android/iOS clients. It emphasizes package boundaries, object-oriented patterns, and a strict separation between presentation and financial rules.
+This document is the detailed technical design for the accepted Hybrid architecture. It retains the baseline shared-API topology while replacing the .NET stack with a Java 21 modular monolith and adding a Java Swing desktop client alongside browser and Android/iOS clients. All clients use the same versioned JSON API. It emphasizes package boundaries, object-oriented domain rules, and strict separation between presentation and financial logic.
 
-The architecture supports independent web and mobile user experiences while centralizing authorization, approvals, split calculations, balances, payments, and reporting in one backend. It does not change product scope or the single-approver v1 decision.
+The architecture supports independent web, mobile, and Swing experiences while centralizing authorization, approvals, split calculations, balances, payments, and reporting in one backend. It does not change product scope or the single-approver v1 decision.
 
 ## 2. Architectural drivers and decisions
 
 | Driver | Design response |
 |---|---|
-| Web plus Android/iOS with consistent behavior | One versioned REST API and one backend domain model; clients contain presentation and transport code only. |
+| Web, Android/iOS, and Swing with consistent behavior | One versioned REST API and one backend domain model; clients contain presentation and transport code only. |
 | Expense approval before balance impact | Explicit expense state machine and transactional approval use case; ledger effects occur only on approval. |
 | Reconstructable, auditable balances | Immutable financial events and approval records are the source of truth; balance views are derived projections. |
 | User and group privacy | Authentication at the edge, authorization in application use cases, and membership-scoped repository queries. |
@@ -30,31 +30,27 @@ Use **Ports and Adapters (Hexagonal Architecture)** within the backend. Domain a
 
 ## 3. System context
 
-```text
- Web browser
- (MVC pages / JS)
-       |
-       | HTTPS, server-rendered pages and/or JSON
-       v
-+-------------------------------+
-| Java 21 SplitSmart backend     |
-|                               |
-| Web/API adapters -> Use cases |
-|                  -> Domain    |
-|                               |
-| Persistence / storage / push  |
-| adapters implement ports      |
-+----+-----------+---------+----+
-     |           |         |
- PostgreSQL   S3-compatible  Push/email
-              receipt store providers
-     ^
-     |
- Android / iOS clients (same versioned JSON API)
-```
+    +-------------------+   +------------------+   +------------------+
+    | Browser web client|   | Android / iOS    |   | Java Swing       |
+    | presentation      |   | clients          |   | desktop client   |
+    +---------+---------+   +--------+---------+   +--------+---------+
+              |                      |                      |
+              +----------------------+----------------------+
+                                     | HTTPS, versioned JSON API
+                                     v
+                     +-------------------------------+
+                     | Java 21 SplitSmart backend    |
+                     | REST/API -> Application       |
+                     |              -> Domain        |
+                     | Adapters implement ports     |
+                     +-----------+---------+---------+
+                                 |         |
+                          PostgreSQL   S3-compatible
+                          source data  private receipt store
+                                 |
+                          Outbox worker -> Push/email providers
 
-The diagram shows logical dependencies, not required deployment units. Initially, the web application and API can run in the same backend deployment. Mobile clients use the API over TLS. Receipt upload uses a short-lived authorized upload/download flow; clients never receive general object-store credentials.
-
+The diagram shows logical dependencies, not required deployment units. The web UI and API may initially run in the same backend deployment. All clients use the API over TLS. Receipt access is authorized and time limited; clients never receive general object-store credentials.
 ## 4. Maven repository layout
 
 ```text
@@ -64,6 +60,8 @@ splitsmart/
 ├── splitsmart-application/         # Use cases, ports, commands, queries, DTOs
 ├── splitsmart-adapters/            # PostgreSQL, object storage, notification adapters
 ├── splitsmart-web/                 # REST API, auth, validation mapping, web UI
+├── splitsmart-desktop/             # Swing UI and API client; no direct DB access
+├── clients-mobile/                 # Android/iOS presentation and API client
 ├── splitsmart-boot/                 # Composition root and executable application
 └── splitsmart-tests/               # Cross-module architecture and integration tests
 ```
@@ -121,7 +119,7 @@ splitsmart-web/src/main/java/com/splitsmart/web/
 └── validation/     # Transport-level input validation
 ```
 
-Package names can be adjusted to the selected Spring Boot or other Java web stack. Framework annotations and ORM entities stay outside the domain module.
+Package names can be adjusted to the selected Spring Boot or other Java web stack. Framework annotations and ORM entities stay outside the domain module. The Android/iOS client is a separately built client project, not a Maven backend module; it consumes the same OpenAPI contract.
 
 ## 5. GUI and business-logic separation
 
@@ -138,7 +136,11 @@ Templates and browser scripts format and display data. They must not calculate s
 
 ### Mobile presentation
 
-Android and iOS clients use screens, navigation, local form state, and API clients. They may offer immediate input feedback, but the server owns the canonical rules and returned state. Mobile clients do not connect directly to PostgreSQL or object storage. Shared OpenAPI schemas can generate or inform typed client models without sharing domain implementation code across platforms.
+Android and iOS clients use screens, navigation, local form state, and API clients. They may offer immediate input feedback, but the server owns the canonical rules and returned state. No client connects directly to PostgreSQL or object storage. Shared OpenAPI schemas can generate or inform typed client models without sharing domain implementation code across platforms.
+
+### Swing desktop presentation
+
+The Swing client is an API client, not a desktop-hosted backend. Organize it around views, controllers/presenters, view models, and an API client. GUI event handlers collect input, perform immediate usability checks, invoke API operations, and render responses. They do not calculate canonical shares, approve expenses, set balances, authorize group access, or access persistence/object storage directly. Keep request/response DTOs client-owned or generated from the OpenAPI contract; do not import backend domain or ORM classes into the desktop module.
 
 ### Application layer
 
@@ -198,7 +200,7 @@ The source-of-truth decision is consistent with the data model: approved expense
 
 ## 9. API and client contract
 
-Expose a versioned HTTPS REST API (for example `/api/v1`) consumed by both web and mobile. Publish an OpenAPI contract. Use request/response DTOs that are separate from domain entities. Core resource groups include:
+Expose a versioned HTTPS REST API at `/api/v1` consumed by web, mobile, and Swing. Publish an OpenAPI contract. Use request/response DTOs that are separate from domain entities. Core resource groups include:
 
 - `/accounts`, `/sessions` or identity-provider callbacks
 - `/groups` and `/groups/{id}/members`
@@ -221,7 +223,7 @@ Use stable error codes for validation, forbidden access, stale versions, invalid
 | FR-007, FR-008 approval/audit | Expense state machine, approval policy, append-only approval records |
 | FR-010 payments | `RecordPayment` use case and payment/ledger domain rules |
 | FR-011 reports | Group-scoped query services using source records/projections |
-| FR-012 web/mobile parity | Versioned shared API and separate platform-specific presentation clients |
+| FR-012, FR-015 web/mobile/Swing parity | Versioned shared API and separate platform-specific presentation clients |
 | Constitution: immutability, security, verification | Aggregate invariants, database constraints, scoped authorization, automated domain/integration verification |
 
 ## 11. Quality attributes and operational requirements
@@ -247,7 +249,7 @@ The constitution requires automated verification for core calculations and finan
 ## 13. Trade-offs and risks
 
 - A modular monolith simplifies atomic financial operations and deployment but requires module boundaries to be enforced through dependency checks and review.
-- Java web UI plus native mobile clients introduces multiple presentation implementations; the shared API and use-case ownership prevent business-rule divergence but do not make UI work disappear.
+- Web, native mobile, and Swing introduce multiple presentation implementations; the shared API and backend use-case ownership prevent business-rule divergence but do not remove client-specific UI work.
 - A ledger projection improves read performance but introduces rebuild/reconciliation work. The underlying approved expenses and payment events remain authoritative.
 - Outbox delivery is eventually consistent. The expense/approval commits immediately while notifications may arrive shortly afterward; the inbox and retry policy make this observable.
 - Authentication provider, receipt retention policy, currency/rounding convention, group removal semantics, overpayment behavior, and approver timeout behavior still need explicit product/security decisions where existing requirements identify edge cases but do not settle policy.
@@ -260,9 +262,9 @@ The constitution requires automated verification for core calculations and finan
 4. Implement account/group authorization and expense submission/approval transaction flow.
 5. Add payment posting, balance query/projection, reconciliation, and reporting.
 6. Add outbox-based in-app/push notifications and receipt storage adapter.
-7. Deliver the web UI and mobile clients against the published API contract.
+7. Deliver the web, mobile, and Swing clients against the published API contract.
 8. Verify the existing acceptance scenarios and performance targets before release.
 
-## 15. Relationship to existing planning documents
+## 15. Relationship to project documents
 
-This is an alternative architecture proposal, not an automatic replacement of `plan.md`, `research.md`, or the .NET project structure. If adopted, update those documents and `quickstart.md` together, including the language/dependency choices, repository layout, local setup, and test commands. Keep `spec.md` as the source for user-visible requirements and record any architecture decision that changes product behavior as a separate clarification.
+This design is the adopted technical architecture and is synchronized with `architecture-decision.md`, `plan.md`, `research.md`, `spec.md`, `data-model.md`, `quickstart.md`, and `contracts/expense-api.yaml`. `spec.md` remains authoritative for user-visible requirements; this document defines implementation boundaries. PlantUML sources in `diagrams/` show the agreed class and activity structures. Any future product behavior change must be recorded as a specification clarification and reflected in these artifacts.
